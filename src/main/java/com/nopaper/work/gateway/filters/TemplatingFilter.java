@@ -21,8 +21,6 @@ import org.springframework.http.server.reactive.ServerHttpResponseDecorator;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-
 /**
  * 
  */
@@ -55,7 +53,30 @@ public class TemplatingFilter implements GlobalFilter, Ordered {
             @Override
             @SneakyThrows
             public Flux<DataBuffer> getBody() {
-                // This body is the DECRYPTED payload from the CryptoFilter
+                
+            	return DataBufferUtils.join(super.getBody())
+                        .flatMap(dataBuffer -> {
+                            byte[] bodyBytes = new byte[dataBuffer.readableByteCount()];
+                            dataBuffer.read(bodyBytes);
+                            DataBufferUtils.release(dataBuffer);
+                            String payload = new String(bodyBytes, StandardCharsets.UTF_8);
+
+                            String authority = exchange.getRequest().getHeaders().getFirst("X-User-Roles");
+                            String requestId = (String) exchange.getAttributes().get("requestId");
+
+                            RequestMetadata metadata = new RequestMetadata(requestId, authority, System.currentTimeMillis());
+                            StandardizedRequest<?> standardizedRequest = new StandardizedRequest<>(metadata, payload);
+                            
+                            try {
+                                byte[] newBodyBytes = objectMapper.writeValueAsBytes(standardizedRequest);
+                                getHeaders().setContentLength(newBodyBytes.length);
+                                return Mono.just(exchange.getResponse().bufferFactory().wrap(newBodyBytes));
+                            } catch (Exception e) {
+                                return Mono.error(new RuntimeException("Failed to serialize standardized request", e));
+                            }
+                        }).flux();
+            	}
+            	/* / This body is the DECRYPTED payload from the CryptoFilter
                 return super.getBody().map(dataBuffer -> {
                     byte[] bodyBytes = new byte[dataBuffer.readableByteCount()];
                     dataBuffer.read(bodyBytes);
@@ -85,11 +106,39 @@ public class TemplatingFilter implements GlobalFilter, Ordered {
                     getHeaders().setContentLength(newBodyBytes.length);
                     return exchange.getResponse().bufferFactory().wrap(newBodyBytes);
                 });
-            }
+            } */
         };
 
         // === RESPONSE TRANSFORMATION ===
+     // Response Transformation
         ServerHttpResponse decoratedResponse = new ServerHttpResponseDecorator(exchange.getResponse()) {
+            @Override
+            public Mono<Void> writeWith(Publisher<? extends DataBuffer> body) {
+                return DataBufferUtils.join(Flux.from(body))
+                    .flatMap(dataBuffer -> {
+                        byte[] bodyBytes = new byte[dataBuffer.readableByteCount()];
+                        dataBuffer.read(bodyBytes);
+                        DataBufferUtils.release(dataBuffer);
+                        String serviceResponsePayload = new String(bodyBytes, StandardCharsets.UTF_8);
+
+                        StandardizedResponse<?> standardizedResponse = new StandardizedResponse<>("SUCCESS", serviceResponsePayload, null);
+                        
+                        try {
+                            byte[] newBodyBytes = objectMapper.writeValueAsBytes(standardizedResponse);
+                            getHeaders().setContentLength(newBodyBytes.length);
+                            DataBuffer buffer = getDelegate().bufferFactory().wrap(newBodyBytes);
+                            return getDelegate().writeWith(Mono.just(buffer));
+                        } catch (Exception e) {
+                            log.error("Failed to serialize standardized response", e);
+                            byte[] errorBytes = "{\"status\":\"ERROR\",\"data\":null,\"error\":{\"code\":\"500\",\"message\":\"Gateway Error\"}}".getBytes();
+                            getHeaders().setContentLength(errorBytes.length);
+                            DataBuffer buffer = getDelegate().bufferFactory().wrap(errorBytes);
+                            return getDelegate().writeWith(Mono.just(buffer));
+                        }
+                    });
+            }
+        };
+ /*       ServerHttpResponse decoratedResponse = new ServerHttpResponseDecorator(exchange.getResponse()) {
             @Override
             public Mono<Void> writeWith(Publisher<? extends DataBuffer> body) {
                  // The body here is the PLAIN TEXT response from the downstream service
@@ -122,7 +171,7 @@ public class TemplatingFilter implements GlobalFilter, Ordered {
                      return getDelegate().writeWith(Mono.just(mergedBuffer));
                  });
             }
-        };
+        }; */
 
         return chain.filter(exchange.mutate().request(decoratedRequest).response(decoratedResponse).build());
     }

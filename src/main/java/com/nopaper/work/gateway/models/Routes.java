@@ -6,18 +6,12 @@
  */
 package com.nopaper.work.gateway.models;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes.Type;
 import com.nopaper.work.gateway.models.audit.AbstractAuditEntity;
 
-import io.lettuce.core.json.JsonType;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -28,8 +22,7 @@ import lombok.EqualsAndHashCode;
 
 @Data
 @EqualsAndHashCode(callSuper = false)
-@Table(name = "users", schema = "npw")
-@EntityScan
+@Table(name = "routes", schema = "way")
 public class Routes extends AbstractAuditEntity {
 
 	private static final long serialVersionUID = -8705629358338932164L;
@@ -45,14 +38,13 @@ public class Routes extends AbstractAuditEntity {
 	private String uri;
 
 	@Column(value = "predicates")
-	private String predicates;
+	private String predicates;		// Stored as JSON String
 
 	@Column(value = "filters")
-	private String filters;
+	private String filters;			// Stored as JSON String
 	
 	@Column(value = "metadata")
-	@Type(JsonType.class)
-	private Map<String, Object> metadata = new HashMap<>();
+	private String metadata;		// Stored as JSON String
 
 	@Column(value = "order")
 	private int order = 0;
